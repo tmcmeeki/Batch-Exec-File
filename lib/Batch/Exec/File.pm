@@ -21,17 +21,13 @@ Add description here.
 
 =over 4
 
-=item OBJ->attribute1
+=item OBJ->force_quote
 
-Get ot set the blah blah blah.  A default applies.
+Get ot set the enforcement of quotes around fields in a CSV.  A default applies.
 
-=item OBJ->attribute2
+=item OBJ->mcn
 
-Get ot set the blah blah blah.  A default applies.
-
-=item OBJ->attribute3
-
-Get ot set the blah blah blah.  A default applies.
+Get ot set the munge_column_names option for CSV input.  A default applies.
 
 =back
 
@@ -45,9 +41,12 @@ use parent 'Batch::Exec';
 use Carp qw(cluck confess);
 use Data::Dumper;
 
+use Text::CSV;
+use Path::Tiny;
+
 
 # --- package constants ---
-#use constant RE_DUMMY => qr/^\s*$/;
+use constant MASK_BITWISE_ON => 077777;
 
 
 # --- package globals ---
@@ -62,10 +61,9 @@ our $VERSION = sprintf "%d.%03d", q[_IDE_REVISION_] =~ /(\d+)/g;
 my $_n_objects = 0;
 
 my %_attribute = (	# _attributes are restricted; no direct get/set
-	_hidden => 1,		# boolean: class global bar value
-	attribute1 => "dummy",
-	attribute2 => RE_DUMMY,
-	attribute3 => undef,
+	_ocsv => undef,	# for CSV object (created on new)
+	force_quote => 0,
+	mcn => "lc",
 );
 
 #sub INIT { };
@@ -129,6 +127,10 @@ sub new {
 		$self->$method($value);
 	}
 	# ___ additional class initialisation here ___
+	my $f_force = $self->force_quote;
+
+	$self->{'_ocsv'} = Text::CSV->new({binary => 1, auto_diag => 1, always_quote => $f_force});
+
 #	$self->log->debug(sprintf "self [%s]", Dumper($self));
 
 	return $self;
@@ -138,22 +140,381 @@ sub new {
 
 =over 4
 
-=item OBJ->method1(EXPR, ...)
+=item OBJ->closeout
 
-Returns ___
+Close all output files and report
 
 =cut
 
-sub method1 {
+sub closeout {
 	my $self = shift;
-	my $expr = shift;
 
-	$self->log->logconfess("SYNTAX method1(EXPR)") unless (
-		defined($expr));
+	$self->log->trace(sprintf "_outfile [%s]", Dumper($self->{'_outfile'}))
+		if (_alive());
 
-	return ___;
+	my $count = 0; while (my ($path, $fh) = each %{ $self->{'_outfile'} }) {
+
+                $self->log->info("output in [$path]")
+			if (_alive());
+
+		next unless ($self->is_stdio($fh) == 0);
+
+                close($fh) || $self->log->warn("close [$path] failed");
+
+		delete $self->{'_outfile'}->{$path};
+
+		$count++;
+	}
+	$self->log->info("created $count output files")
+		if ($count && _alive());
+
+	return $count;
 }
 
+=item OBJ->outfile
+
+Add description here
+
+=cut
+
+sub outfile { 
+	my $self = shift;
+	my $path = shift;
+
+	my $fh; if (defined $path) {
+
+		$fh = IO::File->new();
+
+		$self->log->logconfess("invalid (blank) filename")
+			if ($self->_oben->is_blank($path));
+
+		$self->log->info("opening output [$path]");
+
+		$fh->open(">$path") || $self->log->logconfess("open($path) failed");
+
+		$self->register($path, $fh);
+
+		$self->header($fh)
+			if ($self->{'autoheader'});
+	 } else {
+		$self->log->info("outputting to stdout");
+
+		$fh = \*STDOUT;
+	}
+
+	return $fh;
+}
+
+=item OBJ->csv
+
+Add description here
+
+=cut
+
+sub csv { 
+	my $self = shift;
+	my $fh = shift;
+	confess "SYNTAX: csv(FILEHANDLE)" unless defined($fh);
+
+	my @str = map { (defined $_) ? $_ : $self->null; } @_;
+
+	my $msg = "combine failed on [%s] error [%s]";
+
+	my $status = $self->_ocsv->combine(@str);
+
+	my $error = $self->null
+		unless defined($self->_ocsv->error_input);
+
+	$self->log->logconfess(sprintf $msg, Dumper(\@str), $error)
+		unless ($status);
+
+	my $str = $self->_ocsv->string;
+
+	$self->log->trace("str [$str]");
+
+	print $fh "$str\n";
+
+	return $str;
+}
+
+=item OBJ->catalog_keys
+
+Look for all possible keys across an array of hashes.
+
+=cut
+
+sub catalog_keys {
+	my $self = shift;
+	my $ra = shift;
+	confess "SYNTAX: catalog_keys(ARRAYREF)" unless (
+		defined($ra) && ref($ra) eq 'ARRAY'
+	);
+	my $msg = "structure is not a hash [%s]";
+
+	my %column; for my $rh (@$ra) {
+
+		$self->log->logconfess(sprintf $msg, Dumper($rh))
+			unless (ref($rh) eq 'HASH');
+
+		map {
+			if (exists $column{$_}) {
+				$column{$_}++;
+			} else {
+				$column{$_} = 1;
+			}
+		} keys %$rh;
+	}
+
+	$self->log->trace(sprintf "column [%s]", Dumper(\%column));
+
+	my @columns = sort(keys %column);
+
+	$self->log->debug(sprintf "columns [%s]", Dumper(\@columns));
+
+	return @columns;
+}
+
+=item OBJ->dump_csv
+
+Dump an arbitrary data structure to a CSV file.
+Can pass an array of hashes or a hash of hashes.
+
+=cut
+
+sub dump_csv {
+	my ($self, $pn, $rd) = @_;
+	my $type = ref($rd);	# this should resolve undef okay
+	confess "SYNTAX: dump_csv([EXPR], HASHREF|ARRAYREF)" unless (
+		defined($rd) && ($type eq 'HASH' || $type eq 'ARRAY')
+	);
+	my $msg = "record is not a hash [%s]";
+	my $fho = $self->outfile($pn);
+	my $rows = 0;
+
+	my @data = ($type eq 'HASH') ? values(%$rd) : @$rd;
+
+	my @columns = $self->catalog_keys(\@data);
+
+	for my $rh (@data) {
+
+		$self->log->logconfess(sprintf $msg, Dumper($rh))
+			unless (ref($rh) eq 'HASH');
+
+		$self->csv($fho, @columns)
+			unless ($rows++);
+
+		my @values = map { $rh->{$_} } @columns;
+		
+		$self->csv($fho, @values);
+	}
+	close($fho) unless ($self->is_stdio($fho));
+
+	$self->log->info("wrote $rows records");
+
+	return $rows;
+}
+
+=item OBJ->read_csv
+
+Add description here
+
+=cut
+
+sub read_csv { 
+	my $self = shift;
+	my $pn = shift;
+	confess "SYNTAX: read_csv(PATH)" unless defined($pn);
+
+	my $lc = $self->lines($pn);
+	my $o_csv = Text::CSV->new({ binary => 1, auto_diag => 1 });
+
+	$self->log->info("slurping $lc lines from csv [$pn]");
+
+	open(my $fh, "<:encoding(utf8)", $pn) || $self->log->logconfess("open($pn) failed");
+
+	if (eof $fh) {
+		$self->log->logwarn("WARNING possible empty CSV file [$pn]");
+
+		return undef;
+	}
+
+	my @cols = $o_csv->header($fh, { detect_bom => 1, munge_column_names => $self->mcn });
+
+	$self->log->debug(sprintf "cols [%s]", Dumper(\@cols));
+
+	my @data; my $rows = 0; while (my $row = $o_csv->getline($fh)) {
+
+		$rows++;
+
+		$self->log->trace(sprintf "row $rows row [%s]", Dumper($row));
+
+		push @data, $row;
+	}
+
+	$self->log->info("slurped $rows records");
+
+	$self->cough("expected [$lc] records but read [$rows]")
+		unless ($lc - 1 == $rows);
+
+	$self->log->debug(sprintf "data [%s]", Dumper(\@data));
+
+	return (\@cols, \@data);
+}
+
+=item OBJ->header
+
+Add description here
+
+=cut
+
+sub header {
+	my $self = shift;
+	my $fh = shift;
+	confess "SYNTAX: header(FILEHANDLE)" unless defined ($fh);
+
+	printf $fh "# ---- automatically generated by %s ----\n", $self->{'prefix'};
+
+	printf $fh "# ---- timestamp %s ---- \n", scalar(localtime(time));
+}
+
+=item OBJ->lines(PATH)
+
+Perform a line count of the file specified by PATH.
+
+=cut
+
+sub lines {
+	my $self = shift;
+	my $pn = shift;
+	confess "SYNTAX: lines(EXPR)" unless defined ($pn);
+
+	if ($self->_oben->extant($pn, "f")) {
+
+		my $lc = scalar( path($pn)->lines );
+
+		$self->log->debug("lc [$lc]");
+
+		return $lc;
+	}
+
+	return 0;
+}
+
+=item OBJ->register
+
+Add description here
+
+=cut
+
+sub register {
+	my $self = shift;
+	my $path = shift;
+	my $fh = shift;
+	confess "SYNTAX: register(EXPR, EXPR)"
+		unless (defined($fh) && defined($path));
+
+	if (defined $self->{'_outfile'}) {
+
+		my $emsg = "attempting to open [$path] more than once";
+
+		$self->log->logconfess($emsg)
+			if (exists $self->{'_outfile'}->{$path});
+
+		$self->{'_outfile'}->{$path} = $fh;
+
+	} else {
+		$self->{'_outfile'} = { $path => $fh };
+	}
+
+	$self->log->trace(sprintf "_outfile [%s]", Dumper($self->{'_outfile'}));
+
+	return $path;
+}
+
+=item OBJ->toucher
+
+Add description here
+
+=cut
+
+sub toucher {
+	my $self = shift;
+	my $from = shift;
+#	i. apply the timestamp of one file others, or ii. apply local time or
+#	actual time passed (which is per the localtime struct).
+	confess "SYNTAX: toucher([EXPR|PATH], PATH, ...)" unless (@_);
+
+	my $time;
+	my $verb;
+
+	if (defined $from) {
+		if (-f $from) {
+
+			my $stat = path($from)->stat;
+
+			$time = $stat->mtime;
+			$verb = "cloning";
+
+		} elsif ($from =~ /^\d+$/) {	# integer (time)
+
+			$time = $from;
+			$verb = "applying";
+
+		} else {
+			return $self->cough("invalid file or time [$from]");
+		}
+	} else {
+		$time = time();
+		$verb = "touching";
+	}
+	$self->log->debug("time [$time]");
+
+	$self->log->debug(sprintf "$verb timestamps to [%d] files", scalar(@_));
+
+	my $count = 0; for (@_) {
+		$count++ if defined( path($_)->touch($time) );
+	}
+	return $count;
+}
+
+=item OBJ->cloner
+
+Replicate mode / time between two files optionally erasing first.
+
+=cut
+
+sub cloner {
+	my $self = shift;
+	my ($old,$new,$erase)=@_;
+	confess "SYNTAX: cloner(PATH, PATH, [EXPR])" unless (
+		defined($old) && defined($new));
+
+	my $mode = path($old)->stat->mode;
+	my $ptn = path($new); 
+
+	$erase = 0 unless defined($erase);
+
+	$self->log->debug("old [$old] mode [$mode] new [$new] erase [$erase]");
+
+	$mode = $mode & MASK_BITWISE_ON;
+
+	$self->log->debug(sprintf "chmodding [$new] mode [%04o]", $mode);
+
+ 	$self->log->logconfess("chmod($mode, $new) failed")
+		unless ($ptn->chmod($mode, $new) == 1);
+
+	my $rv = $self->toucher($old, $new);
+
+	$self->delete($old)
+		if ($erase);
+
+	return $rv;
+}
+
+
+	
+	
+	
 =back
 
 =head2 ALIASED METHODS
