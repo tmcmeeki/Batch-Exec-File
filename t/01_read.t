@@ -107,19 +107,19 @@ my @col2 = $ofu1->catalog_keys([values(%str2)]);
 ok(scalar(@col2) == 5,		"str2 key total");
 
 
-# ---- dump_csv files -----
+# ---- write files -----
 my $pn3 = File::Spec->catfile(".", $ofu1->prefix . ".tmp-3");
 my $pn4 = File::Spec->catfile(".", $ofu2->prefix . ".tmp-4");
 my $pn5 = File::Spec->catfile(".", $ofu2->prefix . ".tmp-5");
 
-is($ofu1->dump_csv($pn3, \@str1), 2,	"dump_csv rows [$cycle]");
+is($ofu1->write($pn3, \@str1), 2,	"write rows [$cycle]");
 is($ofu1->lines($pn3), 3,		"linecount [$cycle]"); $cycle++;
 #system("cat $pn3");
-is($ofu2->dump_csv($pn4, \%str2), 2,	"dump_csv rows [$cycle]");
+is($ofu2->write($pn4, \%str2), 2,	"write rows [$cycle]");
 is($ofu1->lines($pn4), 5,		"linecount [$cycle]"); $cycle++;
 #system("cat $pn4");
 
-# the dump_csv above will actually close the output files, so closeout
+# the write above will actually close the output files, so closeout
 # will have nothing to do.
 is($ofu1->closeout, 0,			"closeout zero");
 $ofu2->outfile($pn5);	# changes the closeout behaviour
@@ -140,10 +140,10 @@ grepper $pn3, 0, "invalid";
 grepper $pn4, 0, "invalid";
 
 
-# ---- read_csv files -----
-my ($ra1, $ra2) = $ofu1->read_csv($pn3);
-is( ref($ra1), "ARRAY",		"read_csv rv1 type");
-is( ref($ra2), "ARRAY",		"read_csv rv2 type");
+# ---- read files -----
+my ($ra1, $ra2) = $ofu1->read($pn3);
+is( ref($ra1), "ARRAY",		"read rv1 type");
+is( ref($ra2), "ARRAY",		"read rv2 type");
 is( scalar(@$ra1), 5,		"column count");
 is( scalar(@$ra2), 2,		"row count");
 #is( $ofu1->lines($pn3), 3,	"linecount again");

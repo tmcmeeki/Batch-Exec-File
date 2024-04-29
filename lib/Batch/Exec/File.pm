@@ -21,13 +21,17 @@ Add description here.
 
 =over 4
 
-=item OBJ->force_quote
+=item OBJ->quote
 
 Get ot set the enforcement of quotes around fields in a CSV.  A default applies.
 
-=item OBJ->mcn
+=item OBJ->munge
 
 Get ot set the munge_column_names option for CSV input.  A default applies.
+
+=item OBJ->type
+
+Get ot set the file type, e.g. csv or txt.  A default applies.
 
 =back
 
@@ -41,6 +45,7 @@ use parent 'Batch::Exec';
 use Carp qw(cluck confess);
 use Data::Dumper;
 
+use Batch::Exec::Null;
 use Text::CSV;
 use Path::Tiny;
 
@@ -61,9 +66,11 @@ our $VERSION = sprintf "%d.%03d", q[_IDE_REVISION_] =~ /(\d+)/g;
 my $_n_objects = 0;
 
 my %_attribute = (	# _attributes are restricted; no direct get/set
-	_ocsv => undef,	# for CSV object (created on new)
-	force_quote => 0,
-	mcn => "lc",
+	Oben => undef,	# for Batch::Exec::Null object (created on new)
+	Ocsv => undef,	# for CSV object (created on new)
+	quote => 0,
+	munge => "lc",
+	type => undef,
 );
 
 #sub INIT { };
@@ -127,11 +134,20 @@ sub new {
 		$self->$method($value);
 	}
 	# ___ additional class initialisation here ___
-	my $f_force = $self->force_quote;
+	my $f_force = $self->quote;
 
-	$self->{'_ocsv'} = Text::CSV->new({binary => 1, auto_diag => 1, always_quote => $f_force});
+	$self->Oben(Batch::Exec::Null->new);
+	$self->Ocsv(Text::CSV->new({binary => 1, auto_diag => 1, always_quote => $f_force}));
 
-#	$self->log->debug(sprintf "self [%s]", Dumper($self));
+	my %lovt = (
+		"csv" => "Comma-Separated Variable length",
+		"txt" => "ASCII text",
+	);
+
+	$self->lov(qw/_register type/, \%lovt);
+	$self->lov(qw/_default type/, $self, qw/ type csv /);
+
+	$self->log->debug(sprintf "self [%s]", Dumper($self));
 
 	return $self;
 }
@@ -149,35 +165,35 @@ Close all output files and report
 sub closeout {
 	my $self = shift;
 
-	$self->log->trace(sprintf "_outfile [%s]", Dumper($self->{'_outfile'}))
-		if (_alive());
+	$self->log->trace(sprintf "_file [%s]", Dumper($self->{'_file'}))
+		if ($self->Alive());
 
-	my $count = 0; while (my ($path, $fh) = each %{ $self->{'_outfile'} }) {
+	my $count = 0; while (my ($path, $fh) = each %{ $self->{'_file'} }) {
 
                 $self->log->info("output in [$path]")
-			if (_alive());
+			if ($self->Alive());
 
 		next unless ($self->is_stdio($fh) == 0);
 
                 close($fh) || $self->log->warn("close [$path] failed");
 
-		delete $self->{'_outfile'}->{$path};
+		delete $self->{'_file'}->{$path};
 
 		$count++;
 	}
 	$self->log->info("created $count output files")
-		if ($count && _alive());
+		if ($count && $self->Alive());
 
 	return $count;
 }
 
-=item OBJ->outfile
+=item OBJ->file
 
 Add description here
 
 =cut
 
-sub outfile { 
+sub file { 
 	my $self = shift;
 	my $path = shift;
 
@@ -186,7 +202,7 @@ sub outfile {
 		$fh = IO::File->new();
 
 		$self->log->logconfess("invalid (blank) filename")
-			if ($self->_oben->is_blank($path));
+			if ($self->Oben->is_blank($path));
 
 		$self->log->info("opening output [$path]");
 
@@ -194,8 +210,8 @@ sub outfile {
 
 		$self->register($path, $fh);
 
-		$self->header($fh)
-			if ($self->{'autoheader'});
+		$self->header($fh);
+
 	 } else {
 		$self->log->info("outputting to stdout");
 
@@ -216,19 +232,19 @@ sub csv {
 	my $fh = shift;
 	confess "SYNTAX: csv(FILEHANDLE)" unless defined($fh);
 
-	my @str = map { (defined $_) ? $_ : $self->null; } @_;
+	my @str = map { (defined $_) ? $_ : $self->Oben->null; } @_;
 
 	my $msg = "combine failed on [%s] error [%s]";
 
-	my $status = $self->_ocsv->combine(@str);
+	my $status = $self->Ocsv->combine(@str);
 
-	my $error = $self->null
-		unless defined($self->_ocsv->error_input);
+	my $error = $self->Oben->null
+		unless defined($self->Ocsv->error_input);
 
 	$self->log->logconfess(sprintf $msg, Dumper(\@str), $error)
 		unless ($status);
 
-	my $str = $self->_ocsv->string;
+	my $str = $self->Ocsv->string;
 
 	$self->log->trace("str [$str]");
 
@@ -274,21 +290,21 @@ sub catalog_keys {
 	return @columns;
 }
 
-=item OBJ->dump_csv
+=item OBJ->write
 
 Dump an arbitrary data structure to a CSV file.
 Can pass an array of hashes or a hash of hashes.
 
 =cut
 
-sub dump_csv {
+sub write {
 	my ($self, $pn, $rd) = @_;
 	my $type = ref($rd);	# this should resolve undef okay
-	confess "SYNTAX: dump_csv([EXPR], HASHREF|ARRAYREF)" unless (
+	confess "SYNTAX: write([EXPR], HASHREF|ARRAYREF)" unless (
 		defined($rd) && ($type eq 'HASH' || $type eq 'ARRAY')
 	);
 	my $msg = "record is not a hash [%s]";
-	my $fho = $self->outfile($pn);
+	my $fho = $self->file($pn);
 	my $rows = 0;
 
 	my @data = ($type eq 'HASH') ? values(%$rd) : @$rd;
@@ -314,16 +330,16 @@ sub dump_csv {
 	return $rows;
 }
 
-=item OBJ->read_csv
+=item OBJ->read
 
 Add description here
 
 =cut
 
-sub read_csv { 
+sub read { 
 	my $self = shift;
 	my $pn = shift;
-	confess "SYNTAX: read_csv(PATH)" unless defined($pn);
+	confess "SYNTAX: read(PATH)" unless defined($pn);
 
 	my $lc = $self->lines($pn);
 	my $o_csv = Text::CSV->new({ binary => 1, auto_diag => 1 });
@@ -338,7 +354,7 @@ sub read_csv {
 		return undef;
 	}
 
-	my @cols = $o_csv->header($fh, { detect_bom => 1, munge_column_names => $self->mcn });
+	my @cols = $o_csv->header($fh, { detect_bom => 1, munge_column_names => $self->munge });
 
 	$self->log->debug(sprintf "cols [%s]", Dumper(\@cols));
 
@@ -388,7 +404,7 @@ sub lines {
 	my $pn = shift;
 	confess "SYNTAX: lines(EXPR)" unless defined ($pn);
 
-	if ($self->_oben->extant($pn, "f")) {
+	if ($self->extant($pn, "f")) {
 
 		my $lc = scalar( path($pn)->lines );
 
@@ -413,20 +429,20 @@ sub register {
 	confess "SYNTAX: register(EXPR, EXPR)"
 		unless (defined($fh) && defined($path));
 
-	if (defined $self->{'_outfile'}) {
+	if (defined $self->{'_file'}) {
 
 		my $emsg = "attempting to open [$path] more than once";
 
 		$self->log->logconfess($emsg)
-			if (exists $self->{'_outfile'}->{$path});
+			if (exists $self->{'_file'}->{$path});
 
-		$self->{'_outfile'}->{$path} = $fh;
+		$self->{'_file'}->{$path} = $fh;
 
 	} else {
-		$self->{'_outfile'} = { $path => $fh };
+		$self->{'_file'} = { $path => $fh };
 	}
 
-	$self->log->trace(sprintf "_outfile [%s]", Dumper($self->{'_outfile'}));
+	$self->log->trace(sprintf "_file [%s]", Dumper($self->{'_file'}));
 
 	return $path;
 }
@@ -511,25 +527,26 @@ sub cloner {
 	return $rv;
 }
 
-
-	
-	
-	
 =back
 
 =head2 ALIASED METHODS
 
 The following method aliases have also been defined:
 
-	alias		base method
+	alias		base method (or attribute)
 	------------	------------	
-	isnt_foo	is_notfoo
-	isnt_bar	is_notbar
+	dump_csv	write
+	force_quote	quote
+	mcn		munge
+	outfile		file
+	read_csv	read
 
 =cut
 
-#*isnt_foo = \&is_notfoo;
-#*isnt_bar = \&is_notbar;
+*dump_csv = \&write;
+*force_quote = \&quote;
+*outfile = \&file;
+*read_csv = \&read;
 
 #sub END { }
 

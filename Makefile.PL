@@ -10,9 +10,11 @@ WriteMakefile(
     NAME              => 'Batch::Exec::File',
     VERSION_FROM      => 'lib/Batch/Exec/File.pm', # finds $VERSION, requires EU::MM from perl >= 5.5
     PREREQ_PM         => {
+	'Batch::Exec::Null' => '0',
+	'Path::Tiny' => '0',
+	'Text::CSV' => '0',
         'Carp' => '0',
         'Data::Dumper' => '0',
-        'Log::Log4perl' => '0',
 }, # e.g., Module::Name => 1.1
     ABSTRACT_FROM     => 'lib/Batch/Exec/File.pm', # retrieve abstract from module
 
