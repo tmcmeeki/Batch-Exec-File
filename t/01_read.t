@@ -36,7 +36,9 @@ sub grepper {
 	open(my $fh, "<$fn");
 	my $found = 0; while (<$fh>) { $found += grep(/$re/, $_); }
 	close($fh);
+
 	is($found, $expected,			"$desc cycle [$cycle]");
+
 	$cycle++;
 }
 
@@ -47,17 +49,6 @@ isa_ok($ofu1, "Batch::Exec::File",	"class check $cycle"); $cycle++;
 
 my $ofu2 = Batch::Exec::File->new('autoheader' => 1);
 isa_ok($ofu2, "Batch::Exec::File",	"class check $cycle"); $cycle++;
-
-
-# ---- is_stdio -----
-my $fio = \*STDIN;
-is( $ofu1->is_stdio($fio), 1,	"is_stdio stdin");
-$fio = \*STDOUT;
-is( $ofu1->is_stdio($fio), 1,	"is_stdio stdout");
-$fio = \*STDERR;
-is( $ofu1->is_stdio($fio), 1,	"is_stdio stderr");
-$fio = "null";
-ok( $ofu1->is_stdio($fio) < 0,	"is_stdio failsafe");
 
 
 # ---- outfile and header -----

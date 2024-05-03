@@ -147,7 +147,7 @@ sub new {
 	$self->lov(qw/_register type/, \%lovt);
 	$self->lov(qw/_default type/, $self, qw/ type csv /);
 
-	$self->log->debug(sprintf "self [%s]", Dumper($self));
+#	$self->log->debug(sprintf "self [%s]", Dumper($self));
 
 	return $self;
 }
