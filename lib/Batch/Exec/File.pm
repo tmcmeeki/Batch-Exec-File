@@ -25,6 +25,10 @@ Add description here.
 
 Get ot set the enforcement of quotes around fields in a CSV.  A default applies.
 
+=item OBJ->mask
+
+Get ot set the file permission bitwise mask.  A default applies.
+
 =item OBJ->munge
 
 Get ot set the munge_column_names option for CSV input.  A default applies.
@@ -69,6 +73,7 @@ my %_attribute = (	# _attributes are restricted; no direct get/set
 	Oben => undef,	# for Batch::Exec::Null object (created on new)
 	Ocsv => undef,	# for CSV object (created on new)
 	quote => 0,
+	mask => MASK_BITWISE_ON,
 	munge => "lc",
 	type => undef,
 );
@@ -139,12 +144,10 @@ sub new {
 	$self->Oben(Batch::Exec::Null->new);
 	$self->Ocsv(Text::CSV->new({binary => 1, auto_diag => 1, always_quote => $f_force}));
 
-	my %lovt = (
+	$self->lov(qw/_register type/, {
 		"csv" => "Comma-Separated Variable length",
 		"txt" => "ASCII text",
-	);
-
-	$self->lov(qw/_register type/, \%lovt);
+	});
 	$self->lov(qw/_default type/, $self, qw/ type csv /);
 
 #	$self->log->debug(sprintf "self [%s]", Dumper($self));
@@ -221,9 +224,9 @@ sub file {
 	return $fh;
 }
 
-=item OBJ->csv
+=item OBJ->csv(FILEHANDLE, ...)
 
-Add description here
+Convert any arguments passed into a CSV string and write to the specified file.
 
 =cut
 
@@ -253,16 +256,16 @@ sub csv {
 	return $str;
 }
 
-=item OBJ->catalog_keys
+=item OBJ->catalog(ARRAYREF)
 
 Look for all possible keys across an array of hashes.
 
 =cut
 
-sub catalog_keys {
+sub catalog {
 	my $self = shift;
 	my $ra = shift;
-	confess "SYNTAX: catalog_keys(ARRAYREF)" unless (
+	confess "SYNTAX: catalog(ARRAYREF)" unless (
 		defined($ra) && ref($ra) eq 'ARRAY'
 	);
 	my $msg = "structure is not a hash [%s]";
@@ -309,7 +312,7 @@ sub write {
 
 	my @data = ($type eq 'HASH') ? values(%$rd) : @$rd;
 
-	my @columns = $self->catalog_keys(\@data);
+	my @columns = $self->catalog(\@data);
 
 	for my $rh (@data) {
 
@@ -408,7 +411,7 @@ sub lines {
 
 		my $lc = scalar( path($pn)->lines );
 
-		$self->log->debug("lc [$lc]");
+		$self->log->info("file [$pn] has [$lc] lines");
 
 		return $lc;
 	}
@@ -512,7 +515,7 @@ sub cloner {
 
 	$self->log->debug("old [$old] mode [$mode] new [$new] erase [$erase]");
 
-	$mode = $mode & MASK_BITWISE_ON;
+	$mode = $mode & $self->mask;
 
 	$self->log->debug(sprintf "chmodding [$new] mode [%04o]", $mode);
 
@@ -535,6 +538,7 @@ The following method aliases have also been defined:
 
 	alias		base method (or attribute)
 	------------	------------	
+	catalog_keys	catalog
 	dump_csv	write
 	force_quote	quote
 	mcn		munge
@@ -543,6 +547,7 @@ The following method aliases have also been defined:
 
 =cut
 
+*catalog_keys = \&catalog;
 *dump_csv = \&write;
 *force_quote = \&quote;
 *outfile = \&file;

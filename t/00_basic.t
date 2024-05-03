@@ -7,7 +7,7 @@ use strict;
 use Data::Dumper;
 use Logfer qw/ :all /;
 #use Log::Log4perl qw/ :easy /;
-use Test::More tests => 94;
+use Test::More tests => 98;
 
 BEGIN { use_ok('Batch::Exec::File') };
 
@@ -34,7 +34,7 @@ isa_ok($obn2, "Batch::Exec::File",	"class check $cycle"); $cycle++;
 
 # -------- simple attributes --------
 my @attr = $obn1->Attributes;
-my $attrs = 23;
+my $attrs = 24;
 is(scalar(@attr), $attrs,		"class attributes");
 is(shift @attr, "Batch::Exec::File",	"class okay");
 

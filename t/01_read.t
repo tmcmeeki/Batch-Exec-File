@@ -1,13 +1,14 @@
 #!/usr/bin/perl
 #
-# 01_read.t - test harness for the Batch::Exec::File.pm module: output handling
+# 01_read.t - test harness for the Batch::Exec::File.pm module: input handling
 #
 use strict;
 
 use Data::Compare;
 use Data::Dumper;
+use File::Basename qw/ basename /;
 use Logfer qw/ :all /;
-use Test::More tests => 50;
+use Test::More tests => 55;
 
 BEGIN { use_ok('Batch::Exec::File') };
 
@@ -18,70 +19,72 @@ BEGIN { use_ok('Batch::Exec::File') };
 # -------- global variables --------
 my $log = get_logger(__FILE__);
 my $cycle = 1;
+my @files;
 
 
 # -------- sub-routines --------
+sub dummy_file {
+	my $fn = basename(__FILE__);
+
+	$fn =~ s/\.t$/$cycle/;
+	$fn .= ".tmp";
+
+	push @files, $fn;
+
+	$log->debug(sprintf "files [%s]", Dumper(\@files));
+
+	$cycle++;
+
+	return $fn;
+}
+
+
 sub grepper {
-	my $fn = shift;
-	my $expected = shift;
+	my $obf = shift;
+	my $got = shift;
 	my $re = shift;
 
-	my $desc; if (defined($re)) {
-		$desc = "grep $re";
-	} else {
-		$re = "generated" ;
-		$desc = "autohead";
-	}
+	my $fn = $files[-1];
+	$log->trace("fn [$fn]");
 
-	open(my $fh, "<$fn");
-	my $found = 0; while (<$fh>) { $found += grep(/$re/, $_); }
-	close($fh);
+	my @lines = $obf->c2l("cat $fn");
+	$log->trace(sprintf "lines [%s]", Dumper(\@lines));
 
-	is($found, $expected,			"$desc cycle [$cycle]");
+	# ---- lines -----
+	is(scalar(@lines), $obf->lines($fn),	"lines fn=$fn cycle=$cycle");
+
+	my @found = grep(/$re/, @lines);
+	$log->debug(sprintf "found [%s]", Dumper(\@found));
+
+	is(scalar(@found), $got,	"grepper got=$got cycle=$cycle");
 
 	$cycle++;
 }
 
 
 # -------- main --------
-my $ofu1 = Batch::Exec::File->new;
-isa_ok($ofu1, "Batch::Exec::File",	"class check $cycle"); $cycle++;
-
-my $ofu2 = Batch::Exec::File->new('autoheader' => 1);
-isa_ok($ofu2, "Batch::Exec::File",	"class check $cycle"); $cycle++;
-
-
-# ---- outfile and header -----
-my $pn1 = File::Spec->catfile(".", $ofu1->prefix . ".tmp-1");
-my $pn2 = File::Spec->catfile(".", $ofu2->prefix . ".tmp-2");
-
-ok(defined($ofu1->outfile),		"outfile stdout open");
-
-my $fh1 = $ofu1->outfile($pn1);
-ok(defined($fh1),			"outfile path nohead open");
-is( $ofu1->is_stdio($fh1), 0,		"is_stdio normal [$cycle]"); $cycle++;
-
-my $fh2 = $ofu2->outfile($pn2);
-ok(defined($fh2),			"outfile path header open");
-is( $ofu1->is_stdio($fh2), 0,		"is_stdio normal [$cycle]"); $cycle++;
-
-is($ofu1->closeout, 1,			"closeout count [$cycle]"); $cycle++;
-is($ofu2->closeout, 1,			"closeout count [$cycle]"); $cycle++;
-
-grepper $pn1, 0;
-grepper $pn2, 1;
+my $obf1 = Batch::Exec::File->new;
+isa_ok($obf1, "Batch::Exec::File",	"class check $cycle"); $cycle++;
 
 
 # ---- csv -----
-open(my $fh3, ">$pn1");
-like($ofu1->csv($fh3, "csv1", "csv2"), qr/csv1.*csv2/,	"csv return");
-close($fh3);
-grepper $pn1, 1, "csv1";
-grepper $pn1, 1, "csv2";
-#system("cat $pn1");
+my $fn1 = dummy_file;
+open(my $fh, ">$fn1");
+
+like($obf1->csv($fh, "csv1", "csv2"), qr/csv/,	"csv pair");
+like($obf1->csv($fh, "csv3"), qr/csv3/,		"csv third");
+like($obf1->csv($fh, "csv4"), qr/csv4/,		"csv fourth");
+
+close($fh);
+
+grepper($obf1, 1, "csv1");
+grepper($obf1, 1, "csv2");
+grepper($obf1, 1, "csv3");
+grepper($obf1, 1, "csv4");
+grepper($obf1, 3, "csv");
 
 
-# ---- catalog keys -----
+# ---- catalog -----
 my %rec1 = ( 'key1' => 'value1', 'key2' => 'value2', 'key3' => 'value3' );
 my %rec2 = ( 'key3' => 'value3', 'key4' => 'value4', 'key5' => 'value5' );
 
@@ -91,68 +94,69 @@ my %str2 = ( 'id1' => { %rec1 }, 'id2' => { %rec2 } );	# hash of hashes
 $log->trace(sprintf "str1 [%s]", Dumper(\@str1));
 $log->trace(sprintf "str2 [%s]", Dumper(\%str2));
 
-my @col1 = $ofu1->catalog_keys(\@str1);
-ok(scalar(@col1) == 5,		"str1 key total");
+my @col1 = $obf1->catalog(\@str1);
+ok(scalar(@col1) == 5,			"str1 key total");
+is(scalar(grep(/key\d/, @col1)), 5,	"str1 key names");
 
-my @col2 = $ofu1->catalog_keys([values(%str2)]);
-ok(scalar(@col2) == 5,		"str2 key total");
-
-
-# ---- write files -----
-my $pn3 = File::Spec->catfile(".", $ofu1->prefix . ".tmp-3");
-my $pn4 = File::Spec->catfile(".", $ofu2->prefix . ".tmp-4");
-my $pn5 = File::Spec->catfile(".", $ofu2->prefix . ".tmp-5");
-
-is($ofu1->write($pn3, \@str1), 2,	"write rows [$cycle]");
-is($ofu1->lines($pn3), 3,		"linecount [$cycle]"); $cycle++;
-#system("cat $pn3");
-is($ofu2->write($pn4, \%str2), 2,	"write rows [$cycle]");
-is($ofu1->lines($pn4), 5,		"linecount [$cycle]"); $cycle++;
-#system("cat $pn4");
-
-# the write above will actually close the output files, so closeout
-# will have nothing to do.
-is($ofu1->closeout, 0,			"closeout zero");
-$ofu2->outfile($pn5);	# changes the closeout behaviour
-is($ofu2->closeout, 1,			"closeout one");
-
-grepper $pn3, 0;
-grepper $pn4, 1;
-
-my @grep = qw/ key1 value1 key5 value5 /;
-for my $grep (@grep) {
-	grepper $pn3, 1, $grep;
-	grepper $pn4, 1, $grep;
-}
-grepper $pn3, 2, "value3";
-grepper $pn4, 2, "value3";
-
-grepper $pn3, 0, "invalid";
-grepper $pn4, 0, "invalid";
+my @col2 = $obf1->catalog_keys([values(%str2)]);	# test the alias
+ok(scalar(@col2) == 5,			"str2 key total");
+is(scalar(grep(/key\d/, @col2)), 5,	"str2 key names");
 
 
-# ---- read files -----
-my ($ra1, $ra2) = $ofu1->read($pn3);
-is( ref($ra1), "ARRAY",		"read rv1 type");
-is( ref($ra2), "ARRAY",		"read rv2 type");
-is( scalar(@$ra1), 5,		"column count");
-is( scalar(@$ra2), 2,		"row count");
-#is( $ofu1->lines($pn3), 3,	"linecount again");
+# ---- read -----
+my $fn2 = dummy_file;
+open($fh, ">$fn2");
+
+like($obf1->csv($fh, sort keys %rec1), qr/key/,		"csv keys");
+like($obf1->csv($fh, sort values %rec1), qr/value/,	"csv values 1st row");
+like($obf1->csv($fh, sort values %rec2), qr/value/,	"csv values 2nd row");
+
+close($fh);
+
+grepper($obf1, 1, "key");
+grepper($obf1, 1, "key1");
+grepper($obf1, 1, "key2");
+grepper($obf1, 1, "key3");
+
+grepper($obf1, 1, "value1");
+grepper($obf1, 1, "value2");
+grepper($obf1, 2, "value3");
+grepper($obf1, 1, "value4");
+grepper($obf1, 1, "value5");
+grepper($obf1, 2, "value");
+
+my ($ra1, $ra2) = $obf1->read($fn2);
+
+is(ref($ra1), "ARRAY",		"read rv1 type");
+is(ref($ra2), "ARRAY",		"read rv2 type");
+
+is(scalar(@$ra1), 3,		"column count");
+is(scalar(@$ra2), 2,		"row count");
+
+is_deeply([sort keys %rec1], [sort @$ra1],	"read keys");
+
+is($ra2->[0]->[0], "value1",	"cell cycle=$cycle"); $cycle++;
+is($ra2->[0]->[1], "value2",	"cell cycle=$cycle"); $cycle++;
+is($ra2->[0]->[2], "value3",	"cell cycle=$cycle"); $cycle++;
+
+is($ra2->[1]->[0], "value3",	"cell cycle=$cycle"); $cycle++;
+is($ra2->[1]->[1], "value4",	"cell cycle=$cycle"); $cycle++;
+is($ra2->[1]->[2], "value5",	"cell cycle=$cycle"); $cycle++;
 
 
 # ---- cleanup -----
-for my $pn ($pn1, $pn2, $pn3, $pn4, $pn5) {
+for my $fn (@files) {
 
-	$ofu1->delete($pn);
+	unlink $fn;
 
-	ok(! -f $pn,		"delete path [$pn]");
+	ok(! -f $fn,		"delete path [$fn]");
 }
 
 __END__
 
 =head1 DESCRIPTION
 
-Batch::Exec::File-4.t - test harness for the Batch::Exec::File.pm module: output handling
+01_read.t - test harness for the Batch::Exec::File.pm module: output handling
 
 =head1 VERSION
 
