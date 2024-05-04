@@ -10,6 +10,7 @@ WriteMakefile(
     NAME              => 'Batch::Exec::File',
     VERSION_FROM      => 'lib/Batch/Exec/File.pm', # finds $VERSION, requires EU::MM from perl >= 5.5
     PREREQ_PM         => {
+	'Batch::Exec' => '1.14',
 	'Batch::Exec::Null' => '0',
 	'Path::Tiny' => '0',
 	'Text::CSV' => '0',

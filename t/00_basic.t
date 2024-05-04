@@ -7,9 +7,17 @@ use strict;
 use Data::Dumper;
 use Logfer qw/ :all /;
 #use Log::Log4perl qw/ :easy /;
-use Test::More tests => 98;
 
-BEGIN { use_ok('Batch::Exec::File') };
+#use Test::More tests => 98;
+use Test::More;
+use lib 't';
+use tester;
+
+my $ot = tester->new;
+$ot->planned(98);
+
+use_ok($ot->this);
+#BEGIN { use_ok($ot->this); }
 
 
 # -------- constants --------
@@ -18,18 +26,15 @@ BEGIN { use_ok('Batch::Exec::File') };
 # -------- global variables --------
 my $log = get_logger(__FILE__);
 
-my $cycle = 1;
-
 
 # -------- subroutines --------
 
 
 # -------- main --------
-my $obn1 = Batch::Exec::File->new;
-isa_ok($obn1, "Batch::Exec::File",	"class check $cycle"); $cycle++;
-
-my $obn2 = Batch::Exec::File->new(munge => "uc");
-isa_ok($obn2, "Batch::Exec::File",	"class check $cycle"); $cycle++;
+#my $obn1 = Batch::Exec::File->new;
+#isa_ok($obn1, "Batch::Exec::File",	"class check $cycle"); $cycle++;
+my $obn1 = $ot->object;
+my $obn2 = $ot->object(munge => "uc");
 
 
 # -------- simple attributes --------
@@ -50,21 +55,19 @@ for my $attr (@attr) {
 		$type = "s";
 	}
 
-	is($obn1->$attr($set), $set,	"$attr set cycle $cycle");
-	isnt($obn1->$attr, $dfl,	"$attr check");
+	is($obn1->$attr($set), $set,	$ot->cond("$attr set"));
+	isnt($obn1->$attr, $dfl,	$ot->cond("$attr check"));
 
 	$log->debug(sprintf "attr [$attr]=%s", $obn1->$attr);
 
 	if ($type eq "s") {
 		my $ck = (defined $dfl) ? $dfl : "_null_";
 
-		ok($obn1->$attr ne $ck,	"$attr string");
+		ok($obn1->$attr ne $ck,	$ot->cond("$attr string"));
 	} else {
-		ok($obn1->$attr < 0,	"$attr number");
+		ok($obn1->$attr < 0,	$ot->cond("$attr number"));
 	}
-	is($obn1->$attr($dfl), $dfl,	"$attr reset");
-
-        $cycle++;
+	is($obn1->$attr($dfl), $dfl,	$ot->cond("$attr reset"));
 }
 
 

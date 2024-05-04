@@ -91,7 +91,7 @@ sub get_perms {
 
 # -------- main --------
 my $ofp = Batch::Exec::File->new;
-isa_ok($ofp, "Batch::Exec::File",		"class check $cycle"); $cycle++;
+isa_ok($ofp, "Batch::Exec::File",	"class check $cycle"); $cycle++;
 
 my $tf2 = $ofp->mktmpfile;
 ok(-f $tf2,				"file exists 1");
@@ -211,7 +211,7 @@ __END__
 
 =head1 DESCRIPTION
 
-Batch::Exec::File-6.t - test harness for the Batch::Exec::File.pm module: perms / modes
+02_touch.t - test harness for the Batch::Exec::File.pm module: perms / modes
 
 =head1 VERSION
 

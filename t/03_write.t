@@ -152,7 +152,7 @@ __END__
 
 =head1 DESCRIPTION
 
-Batch::Exec::File-4.t - test harness for the Batch::Exec::File.pm module: output handling
+03_write.t - test harness for the Batch::Exec::File.pm module: output handling
 
 =head1 VERSION
 
