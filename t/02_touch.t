@@ -1,123 +1,54 @@
 #!/usr/bin/perl
 #
-# 02_touch.t - test harness for the Batch::Exec::File.pm module: perms / modes
+# 02_touch.t - test harness for the Batch::Exec::File class: perms / modes
 #
 use strict;
 
 use Data::Dumper;
-use File::chmod qw( getmod );
-use File::chmod qw( getmod );
 use Logfer qw/ :all /;
-use Test::More tests => 61;
 
-BEGIN { use_ok('Batch::Exec::File') };
+use Test::More;
+use lib 't';
+use tester;
+
+my $ot = tester->new;
+$ot->planned(60);
+
+use_ok($ot->this);
 
 
 # -------- constants --------
-use constant MODE_SKIP => "abc";
-use constant STAT_PERMS => 2;
-use constant STAT_MTIME => 9;
 
 
 # -------- global variables --------
 my $log = get_logger(__FILE__);
-my $cycle = 1;
-my $g_windows = 0;
-
-
-sub ck_octal {
-	my ($pn,$o_exp,$desc)=@_;
-
-	$desc = sprintf "cycle %d", $cycle++ unless defined($desc);
-
-	my $o_act = getmod($pn);
-
-	my $oo_act = sprintf "%o", $o_act;
-	my $oo_exp = sprintf "%o", $o_exp;
-
-	$log->debug("oo_exp [$oo_exp] oo_act [$oo_act]");
-
-	is($oo_act, $oo_exp,	"$desc ck_octal");
-
-	return $oo_act;
-}
-
-
-sub ck_perms {
-	my $pn = shift;
-	my $wanted = shift;
-	my $desc = shift;
-
-	$desc = sprintf "cycle %d", $cycle++ unless defined($desc);
-
-	my $perms; if ($g_windows) {
-
-		$wanted = MODE_SKIP;
-		$perms = $wanted;
-	} else {
-		$perms = get_perms($pn);
-	}
-	my $re = qr/$wanted/;
-
-	like($perms, $re,	"$desc ck_perms");
-
-	return $perms;
-}
-
-
-sub get_perms {
-	my ($pn,$len)=@_;
-
-	system("sync");
-	system("sync");
-	my $pipe = readpipe("ls -ld \'$pn\'");
-	chomp $pipe;
-	$log->trace("pipe [$pipe]");
-
-#	my $template = "x1a$len";
-#	my $retval = unpack $template, $pipe;
-	my @pipe = split(/\s+/, $pipe);
-
-	my $perm = shift @pipe;
-	$perm =~ s/^\-//;
-	$perm =~ s/\+$//;
-	$perm =~ s/\-/0/g;
-
-	$log->trace(sprintf "perm [$perm] pipe [%s]", Dumper(\@pipe));
-
-	return $perm;
-}
 
 
 # -------- main --------
-my $ofp = Batch::Exec::File->new;
-isa_ok($ofp, "Batch::Exec::File",	"class check $cycle"); $cycle++;
+my $ofp = $ot->object;
 
-my $tf2 = $ofp->mktmpfile;
-ok(-f $tf2,				"file exists 1");
-my $tf4 = $ofp->mktmpfile;
-ok(-f $tf4,				"file exists 2");
-
-$g_windows = 1 if ($ofp->on_windows);
+my $tf2 = $ot->mkfile;
+ok(-f $tf2,				$ot->cond("file exists"));
+my $tf4 = $ot->mkfile;
+ok(-f $tf4,				$ot->cond("file exists"));
 
 
 # ----- chmod: basic -----
-ck_perms($tf2, '^rw',		"default verify");
+$ot->ck_perms($tf2, '^rw',		$ot->cond("default verify"));
 
-is($ofp->chmod(0700, $tf2), 1,	"chmod exec apply");
-ck_perms($tf2, "^rwx",		"text exec");
-ck_octal($tf2, 0700,		"octal exec");
-is(getmod($tf2), 0700,		"getmod exec");
+is($ofp->chmod(0700, $tf2), 1,	$ot->cond("chmod exec apply"));
+$ot->ck_perms($tf2, "^rwx",		$ot->cond("text exec"));
+$ot->ck_octal($tf2, 0700,		$ot->cond("octal exec"));
 
-is($ofp->chmod("a+rwx", $tf2), 1,	"chmod allexec");
-ck_perms($tf2, "rwxrwxrwx",	"text allexec");
-ck_octal($tf2, 0777,		"octal allexec");
+is($ofp->chmod("a+rwx", $tf2), 1,	$ot->cond("chmod allexec"));
+$ot->ck_perms($tf2, "rwxrwxrwx",	$ot->cond("text allexec"));
+$ot->ck_octal($tf2, 0777,		$ot->cond("octal allexec"));
 
-is($ofp->chmod("og-x", $tf2), 1,"chmod remove exec");
-ck_perms($tf2, "rwxrw0rw0",	"text noexec");
-ck_octal($tf2, 0766,		"octal noexec");
+is($ofp->chmod("og-x", $tf2), 1,	$ot->cond("chmod remove exec"));
+$ot->ck_perms($tf2, "rwxrw0rw0",	$ot->cond("text noexec"));
+$ot->ck_octal($tf2, 0766,		$ot->cond("octal noexec"));
 
-is($ofp->chmod(0600, $tf2), 1,	"chmod reset");
+is($ofp->chmod(0600, $tf2), 1,	$ot->cond("chmod reset"));
 if($ofp->on_cygwin || $ofp->on_windows) {
 	diag("chmod user execute bit removal does not appear to work on cygwin");
 	#  $ touch x
@@ -127,84 +58,82 @@ if($ofp->on_cygwin || $ofp->on_windows) {
 	#  $ chmod u-x x
 	#  -rw-r--r--+ 1 tomby tmcme 0 Dec 10 18:34 x
 
-	is(0, 0, 			"text reset skipped");
-	ok(1,				"octal reset skipped");
+	is(0, 0, 			$ot->cond("text reset skipped"));
+	ok(1,				$ot->cond("octal reset skipped"));
 } else {
-	ck_perms($tf2, "^rw00",		"text reset checked");
-	ck_octal($tf2, 0600,		"octal reset checked");
+	$ot->ck_perms($tf2, "^rw00",		$ot->cond("text reset checked"));
+	$ot->ck_octal($tf2, 0600,		$ot->cond("octal reset checked"));
 }
 
-is($ofp->chmod("u+x", $tf2), 1, 	"chmod uexec");
-ck_perms($tf2, "rwx000",		"text uexec");
-ck_octal($tf2, 0700,			"octal uexec");
+is($ofp->chmod("u+x", $tf2), 1, 	$ot->cond("chmod uexec"));
+$ot->ck_perms($tf2, "rwx000",		$ot->cond("text uexec"));
+$ot->ck_octal($tf2, 0700,			$ot->cond("octal uexec"));
 
 
 # ----- chmod: multiple -----
-ok($ofp->chmod(0444, $tf2, $tf4) == 2,	"chmod multi 1a");
-ck_perms($tf2, "r0.r0.r0.",		"chmod multi 1b");
-ck_perms($tf4, "r0.r0.r0.",		"chmod multi 1c");
+ok($ofp->chmod(0444, $tf2, $tf4) == 2,	$ot->cond("chmod multi"));
+$ot->ck_perms($tf2, "r0.r0.r0.",		$ot->cond("chmod multi"));
+$ot->ck_perms($tf4, "r0.r0.r0.",		$ot->cond("chmod multi"));
 
-ok($ofp->chmod(0777, $tf2, $tf4) == 2,	"chmod multi 2a");
-ck_perms($tf2, "rwxrwxrwx",		"chmod multi 2b");
-ck_perms($tf4, "rwxrwxrwx",		"chmod multi 2c");
+ok($ofp->chmod(0777, $tf2, $tf4) == 2,	$ot->cond("chmod multi"));
+$ot->ck_perms($tf2, "rwxrwxrwx",		$ot->cond("chmod multi"));
+$ot->ck_perms($tf4, "rwxrwxrwx",		$ot->cond("chmod multi"));
 
-ok($ofp->chmod(0550, $tf2, $tf4) == 2,	"chmod multi 3a");
-ck_perms($tf2, "r0xr0x000",		"chmod multi 3b");
-ck_perms($tf4, "r0xr0x000",		"chmod multi 3c");
+ok($ofp->chmod(0550, $tf2, $tf4) == 2,	$ot->cond("chmod multi"));
+$ot->ck_perms($tf2, "r0xr0x000",		$ot->cond("chmod multi"));
+$ot->ck_perms($tf4, "r0xr0x000",		$ot->cond("chmod multi"));
 
 
 # ---- mkro -----
-ok($ofp->chmod(0666, $tf4),	"mkro start");
-ck_perms($tf4, "rw.rw.rw.",	"mkro before");
-is( $ofp->mkro($tf4), 1,	"mkro change");
-ck_perms($tf4, "r0.r0.r0.",	"mkro after");
+ok($ofp->chmod(0666, $tf4),	$ot->cond("mkro start"));
+$ot->ck_perms($tf4, "rw.rw.rw.",	$ot->cond("mkro before"));
+is( $ofp->mkro($tf4), 1,	$ot->cond("mkro change"));
+$ot->ck_perms($tf4, "r0.r0.r0.",	$ot->cond("mkro after"));
 
 
 # ---- mkwrite -----
-ok($ofp->chmod(0444, $tf2),	"mkwrite start");
-ck_perms($tf2, "^r0",		"mkwrite");
-ok( $ofp->mkwrite($tf2),	"mkwrite change");
-ck_perms($tf2, "^rw",		"mkwrite verify");
+ok($ofp->chmod(0444, $tf2),	$ot->cond("mkwrite start"));
+$ot->ck_perms($tf2, "^r0",		$ot->cond("mkwrite"));
+ok( $ofp->mkwrite($tf2),	$ot->cond("mkwrite change"));
+$ot->ck_perms($tf2, "^rw",		$ot->cond("mkwrite verify"));
 
 
 # ---- mkexec -----
-ok($ofp->chmod(0444, $tf2),	"mkexec start");
-ck_perms($tf2, "r0.r00r00",	"mkexec");
-ok( $ofp->mkexec($tf2),		"mkexec on");
-ck_perms($tf2, "r0xr0xr0x",	"mkexec verify");
+ok($ofp->chmod(0444, $tf2),	$ot->cond("mkexec start"));
+$ot->ck_perms($tf2, "r0.r00r00",	$ot->cond("mkexec"));
+ok( $ofp->mkexec($tf2),		$ot->cond("mkexec on"));
+$ot->ck_perms($tf2, "r0xr0xr0x",	$ot->cond("mkexec verify"));
 
 
 # ---- cloner: basic -----
-is($ofp->toucher(undef, $tf2), 1,	"clone init 1a");
-is($ofp->chmod(0700, $tf2), 1,		"clone init 1b");
+is($ofp->toucher(undef, $tf2), 1,	$ot->cond("clone init"));
+is($ofp->chmod(0700, $tf2), 1,		$ot->cond("clone init"));
 sleep(2);
-is($ofp->toucher(undef, $tf4), 1,	"clone init 1c");
-is($ofp->chmod(0770, $tf4), 1,		"clone init 1d");
-isnt((stat($tf2))[STAT_PERMS], (stat($tf4))[STAT_PERMS], "clone check 1a");
-isnt((stat($tf2))[STAT_MTIME], (stat($tf4))[STAT_MTIME], "clone check 1b");
+is($ofp->toucher(undef, $tf4), 1,	$ot->cond("clone init"));
+is($ofp->chmod(0770, $tf4), 1,		$ot->cond("clone init"));
+$ot->diff($tf2, $tf4);
 
-is($ofp->cloner($tf2, $tf4), 1,		"cloner 1");
-is((stat($tf2))[STAT_PERMS], (stat($tf4))[STAT_PERMS], "clone check 1c");
-is((stat($tf2))[STAT_MTIME], (stat($tf4))[STAT_MTIME], "clone check 1d");
+is($ofp->cloner($tf2, $tf4), 1,		$ot->cond("cloner"));
+$ot->diff($tf2, $tf4, 1);
+
 
 # ---- cloner: erase -----
 sleep(2);
-is($ofp->toucher(undef, $tf4), 1,	"clone init 2a");
-is($ofp->chmod(0770, $tf4), 1,		"clone init 2b");
-isnt((stat($tf2))[STAT_PERMS], (stat($tf4))[STAT_PERMS], "clone check 2a");
-isnt((stat($tf2))[STAT_MTIME], (stat($tf4))[STAT_MTIME], "clone check 2b");
+is($ofp->toucher(undef, $tf4), 1,	$ot->cond("clone init"));
+is($ofp->chmod(0770, $tf4), 1,		$ot->cond("clone init"));
+$ot->diff($tf2, $tf4);
 
-my $sf2_perms = (stat($tf2))[STAT_PERMS];
-my $sf2_mtime = (stat($tf2))[STAT_MTIME];
-is($ofp->cloner($tf2, $tf4, 1), 1,		"cloner 2");
-is($sf2_perms, (stat($tf4))[STAT_PERMS],	"clone check 2c");
-is($sf2_mtime, (stat($tf4))[STAT_MTIME],	"clone check 2d");
-ok(!-f $tf2, 					"clone check 2e");
+my $sf2_perms = (stat($tf2))[$ot->perms];
+my $sf2_mtime = (stat($tf2))[$ot->mtime];
+is($ofp->cloner($tf2, $tf4, 1), 1,		$ot->cond("cloner"));
+is($sf2_perms, (stat($tf4))[$ot->perms],	$ot->cond("clone check"));
+is($sf2_mtime, (stat($tf4))[$ot->mtime],	$ot->cond("clone check"));
+ok(!-f $tf2, 					$ot->cond("clone check"));
 
 
 # ---- cleanup -----
-ok( $ofp->delete($tf2) == 0,	"cleanup 1");
-ok( $ofp->delete($tf4) == 0,	"cleanup 2");
+ok( $ofp->delete($tf2) == 0,	$ot->cond("cleanup"));
+ok( $ofp->delete($tf4) == 0,	$ot->cond("cleanup"));
 
 
 __END__

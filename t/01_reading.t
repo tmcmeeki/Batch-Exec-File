@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# 01_read.t - test harness for the Batch::Exec::File.pm module: input handling
+# 01_read.t - test harness for the Batch::Exec::File class: input handling
 #
 use strict;
 

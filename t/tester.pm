@@ -1,34 +1,21 @@
 package tester;
-#########################
-# This module assist in testing the Tk dialog functions, by issuing
-# button events and thus allowing the dialog to be seen "briefly".
 #
-# tester.pm - test harness for module Batch::Exec::File
+# tester.pm - test harness for the Batch::Exec::File class: common routines
 #
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published
-# by the Free Software Foundation; either version 2 of the License,
-# or any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-#########################
 use strict;
 use warnings;
 
 use Carp qw(cluck confess);     # only use stack backtrace within class
 use Data::Dumper;
 use File::Basename;
+use File::chmod qw( getmod );
 use Log::Log4perl qw/ :easy /;
 use Test::More;
 
 use constant MY_CLASS => 'Batch::Exec::File';
+use constant MODE_SKIP => "abc";
+use constant STAT_PERMS => 2;
+use constant STAT_MTIME => 9;
 
 our $AUTOLOAD;
 
@@ -39,7 +26,10 @@ my %attribute = (
 	executed => 0,
 	files => [],
 	log => get_logger(MY_CLASS),
+	mtime => STAT_MTIME,
+	perms => STAT_PERMS,
 	this => MY_CLASS,
+	windows => undef,
 );
 
 # -------- standard routines --------
@@ -120,6 +110,8 @@ sub cond {
 
 #	$self->log->debug(sprintf "condition [%s]", Dumper($self->condition));
 
+	$self->{'executed'}++;
+
 	return $cond;
 }
 
@@ -132,8 +124,9 @@ sub object {
 	$self->log->info(sprintf "instantiating $cond %s args", (@_) ? "with" : "without");
 
 	my $obj = $class->new(@_);
+	$self->windows($obj->on_windows);
 
-	isa_ok($obj, $class,      "object $cond");
+	isa_ok($obj, $class,	$self->cond($cond));
 
 	return $obj;
 }
@@ -142,7 +135,7 @@ sub planned {
 	my $self = shift;
 	my $n_tests = shift;
 
-	confess "SYNTAX: plan(tests)" unless defined ($n_tests);
+	confess "SYNTAX plan(tests)" unless defined ($n_tests);
 
 	$self->{'_planned'} = $n_tests;
 
@@ -154,9 +147,7 @@ sub planned {
 sub mkfn {
 	my $self = shift;
 
-#	my $fn = basename(__FILE__);
 	my $fn = basename($0);
-#	my $ext = sprintf "%03d", int(rand(1000));
 	my $ext = scalar(@{ $self->files }) + 1;
 
 	$fn =~ s/\.t$/_$ext/;
@@ -198,6 +189,105 @@ sub cleanup {
 	confess "SYNTAX cleanup(OBJ)" unless defined($obj);
 
 	ok($obj->delete(@{ $self->files }) == 0,	$self->cond("cleanup"));
+}
+
+sub ck_octal {
+	my $self = shift;
+	my ($pn,$o_exp,$desc)=@_;
+
+	my $o_act = getmod($pn);
+
+	my $oo_act = sprintf "%o", $o_act;
+	my $oo_exp = sprintf "%o", $o_exp;
+
+	$self->log->debug("oo_exp [$oo_exp] oo_act [$oo_act]");
+
+	is($oo_act, $oo_exp,	$self->cond("ck_octal"));
+
+	return $oo_act;
+}
+
+sub diff {
+	my $self = shift;
+	my $pn1 = shift;
+	my $pn2 = shift;
+	my $polarity = shift; $polarity = 0 unless defined($polarity);
+	confess "SYNTAX diff(PATH, PATH)" unless (
+		defined($pn1) && defined($pn2));
+
+	my $value1 = (stat($pn1))[$self->perms];
+	my $value2 = (stat($pn2))[$self->perms];
+
+	if ($polarity) {
+		is($value1, $value2,		$self->cond("diff perms"));
+	} else {
+		isnt($value1, $value2,		$self->cond("diff perms"));
+	}
+
+	$value1 = (stat($pn1))[$self->mtime];
+	$value2 = (stat($pn2))[$self->mtime];
+
+	if ($polarity) {
+		is($value1, $value2,		$self->cond("diff mtime"));
+	} else {
+		isnt($value1, $value2,		$self->cond("diff mtime"));
+	}
+}
+
+sub ck_perms {
+	my $self = shift;
+	my $pn = shift;
+	my $wanted = shift;
+	my $desc = shift;
+
+	my $perms; if ($self->windows) {
+
+		$wanted = MODE_SKIP;
+		$perms = $wanted;
+	} else {
+		$perms = $self->get_perms($pn);
+	}
+	my $re = qr/$wanted/;
+
+	like($perms, $re,	$self->cond("ck_perms"));
+
+	return $perms;
+}
+
+sub get_perms {
+	my $self = shift;
+	my ($pn,$len)=@_;
+
+	system("sync");
+	system("sync");
+	my $pipe = readpipe("ls -ld \'$pn\'");
+	chomp $pipe;
+	$self->log->trace("pipe [$pipe]");
+
+#	my $template = "x1a$len";
+#	my $retval = unpack $template, $pipe;
+	my @pipe = split(/\s+/, $pipe);
+
+	my $perm = shift @pipe;
+	$perm =~ s/^\-//;
+	$perm =~ s/\+$//;
+	$perm =~ s/\-/0/g;
+
+	$self->log->trace(sprintf "perm [$perm] pipe [%s]", Dumper(\@pipe));
+
+	return $perm;
+}
+
+sub mkfile {
+	my $self = shift;
+	my $pn = $self->mkfn;
+
+	$self->log->debug("creating [$pn]");
+
+	open(my $fh, ">$pn") || die("open($pn) failed");
+	close($fh);
+
+	return $pn;
 }
 
 
